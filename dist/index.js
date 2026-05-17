@@ -42,6 +42,63 @@ server.tool("calculate", "Performs basic arithmetic operations", {
         content: [{ type: "text", text: `${a} ${operation} ${b} = ${result}` }],
     };
 });
+// Tool: get GitHub repositories for a username
+server.tool("get_github_repos", "Fetches public repositories for a given GitHub username", {
+    username: z.string().describe("GitHub username"),
+    sort: z
+        .enum(["created", "updated", "pushed", "full_name"])
+        .optional()
+        .default("updated")
+        .describe("Sort repositories by this field"),
+    limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(10)
+        .describe("Number of repositories to return (max 100)"),
+}, async ({ username, sort, limit }) => {
+    const url = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=${sort}&per_page=${limit}`;
+    const res = await fetch(url, {
+        headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "my-first-mcp",
+        },
+    });
+    if (res.status === 404) {
+        return {
+            content: [{ type: "text", text: `GitHub user "${username}" not found.` }],
+            isError: true,
+        };
+    }
+    if (!res.ok) {
+        return {
+            content: [{ type: "text", text: `GitHub API error: ${res.status} ${res.statusText}` }],
+            isError: true,
+        };
+    }
+    const repos = (await res.json());
+    if (repos.length === 0) {
+        return {
+            content: [{ type: "text", text: `No public repositories found for "${username}".` }],
+        };
+    }
+    const lines = repos.map((repo, i) => {
+        const parts = [
+            `${i + 1}. **${repo.name}**`,
+            `   URL: ${repo.html_url}`,
+            `   Stars: ${repo.stargazers_count}  Forks: ${repo.forks_count}`,
+            repo.language ? `   Language: ${repo.language}` : null,
+            repo.description ? `   ${repo.description}` : null,
+            repo.topics?.length ? `   Topics: ${repo.topics.join(", ")}` : null,
+            `   Updated: ${new Date(repo.updated_at).toDateString()}`,
+        ];
+        return parts.filter(Boolean).join("\n");
+    });
+    const text = `Public repositories for **${username}** (${repos.length} shown):\n\n${lines.join("\n\n")}`;
+    return { content: [{ type: "text", text }] };
+});
 // Resource: server info
 server.resource("server-info", "info://server", { mimeType: "text/plain" }, async () => ({
     contents: [

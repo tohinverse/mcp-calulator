@@ -19,40 +19,119 @@ server.tool(
 
 // Tool: simple calculator
 server.tool(
-  "calculate",
-  "Performs basic arithmetic operations",
+	"calculate",
+	"Performs basic arithmetic operations",
+	{
+		operation: z
+			.enum(["add", "subtract", "multiply", "divide"])
+			.describe("The arithmetic operation to perform"),
+		a: z.number().describe("First number"),
+		b: z.number().describe("Second number"),
+	},
+	async ({ operation, a, b }) => {
+		let result: number;
+		switch (operation) {
+			case "add":
+				result = a + b;
+				break;
+			case "subtract":
+				result = a - b;
+				break;
+			case "multiply":
+				result = a * b;
+				break;
+			case "divide":
+				if (b === 0) {
+					return {
+						content: [{ type: "text", text: "Error: Division by zero" }],
+						isError: true,
+					};
+				}
+				result = a / b;
+				break;
+		}
+		return {
+			content: [{ type: "text", text: `${a} ${operation} ${b} = ${result}` }],
+		};
+	}
+);
+
+// Tool: get GitHub repositories for a username
+server.tool(
+  "get_github_repos",
+  "Fetches public repositories for a given GitHub username",
   {
-    operation: z
-      .enum(["add", "subtract", "multiply", "divide"])
-      .describe("The arithmetic operation to perform"),
-    a: z.number().describe("First number"),
-    b: z.number().describe("Second number"),
+    username: z.string().describe("GitHub username"),
+    sort: z
+      .enum(["created", "updated", "pushed", "full_name"])
+      .optional()
+      .default("updated")
+      .describe("Sort repositories by this field"),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .default(10)
+      .describe("Number of repositories to return (max 100)"),
   },
-  async ({ operation, a, b }) => {
-    let result: number;
-    switch (operation) {
-      case "add":
-        result = a + b;
-        break;
-      case "subtract":
-        result = a - b;
-        break;
-      case "multiply":
-        result = a * b;
-        break;
-      case "divide":
-        if (b === 0) {
-          return {
-            content: [{ type: "text", text: "Error: Division by zero" }],
-            isError: true,
-          };
-        }
-        result = a / b;
-        break;
+  async ({ username, sort, limit }) => {
+    const url = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=${sort}&per_page=${limit}`;
+
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "my-first-mcp",
+      },
+    });
+
+    if (res.status === 404) {
+      return {
+        content: [{ type: "text", text: `GitHub user "${username}" not found.` }],
+        isError: true,
+      };
     }
-    return {
-      content: [{ type: "text", text: `${a} ${operation} ${b} = ${result}` }],
-    };
+
+    if (!res.ok) {
+      return {
+        content: [{ type: "text", text: `GitHub API error: ${res.status} ${res.statusText}` }],
+        isError: true,
+      };
+    }
+
+    const repos = (await res.json()) as Array<{
+      name: string;
+      description: string | null;
+      html_url: string;
+      stargazers_count: number;
+      forks_count: number;
+      language: string | null;
+      updated_at: string;
+      topics: string[];
+    }>;
+
+    if (repos.length === 0) {
+      return {
+        content: [{ type: "text", text: `No public repositories found for "${username}".` }],
+      };
+    }
+
+    const lines = repos.map((repo, i) => {
+      const parts = [
+        `${i + 1}. **${repo.name}**`,
+        `   URL: ${repo.html_url}`,
+        `   Stars: ${repo.stargazers_count}  Forks: ${repo.forks_count}`,
+        repo.language ? `   Language: ${repo.language}` : null,
+        repo.description ? `   ${repo.description}` : null,
+        repo.topics?.length ? `   Topics: ${repo.topics.join(", ")}` : null,
+        `   Updated: ${new Date(repo.updated_at).toDateString()}`,
+      ];
+      return parts.filter(Boolean).join("\n");
+    });
+
+    const text = `Public repositories for **${username}** (${repos.length} shown):\n\n${lines.join("\n\n")}`;
+    return { content: [{ type: "text", text }] };
   }
 );
 
